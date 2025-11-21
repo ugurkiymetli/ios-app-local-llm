@@ -1,9 +1,17 @@
+
 import { useThemeColor } from '@/constants/Colors';
 import i18n from '@/i18n';
 import * as FileSystem from 'expo-file-system/legacy';
+import { SymbolView } from 'expo-symbols';
 import { initLlama, LlamaContext } from 'llama.rn';
-import { useEffect, useState } from 'react';
-import { Button, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Button, FlatList, Keyboard, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+
+interface Message {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+}
 
 export default function ChatInterface() {
   const colors = useThemeColor();
@@ -12,8 +20,10 @@ export default function ChatInterface() {
   const [context, setContext] = useState<LlamaContext | null>(null);
   
   const [input, setInput] = useState('');
-  const [response, setResponse] = useState('');
+  const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const flatListRef = useRef<FlatList>(null);
 
   const modelDir = `${FileSystem.documentDirectory}models/`;
   const modelUri = `${modelDir}Llama-3.2-1B-Instruct-Q4_K_M.gguf`;
@@ -21,6 +31,24 @@ export default function ChatInterface() {
 
   useEffect(() => {
     checkModelExists();
+    
+    const keyboardWillShow = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
+      () => {
+        setKeyboardVisible(true);
+        setTimeout(() => {
+          flatListRef.current?.scrollToEnd({ animated: true });
+        }, 100);
+      }
+    );
+    const keyboardWillHide = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
+      () => setKeyboardVisible(false)
+    );
+    return () => {
+      keyboardWillShow.remove();
+      keyboardWillHide.remove();
+    };
   }, []);
 
   const checkModelExists = async () => {
@@ -70,11 +98,17 @@ export default function ChatInterface() {
   };
 
   const generateText = async () => {
-    if (!context) return;
+    if (!context || !input.trim()) return;
+    
+    const userMessage: Message = { id: Date.now().toString(), role: 'user', content: input };
+    const assistantMessageId = (Date.now() + 1).toString();
+    
+    setMessages(prev => [...prev, userMessage, { id: assistantMessageId, role: 'assistant', content: '' }]);
+    setInput('');
     setLoading(true);
-    setResponse('');
+
     // Llama 3 Instruct Format
-    const prompt = `<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n${input}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n`;
+    const prompt = `<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n${userMessage.content}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n`;
 
     try {
       await context.completion(
@@ -84,24 +118,46 @@ export default function ChatInterface() {
           stop: ["<|eot_id|>", "<|end_of_text|>"],
         },
         (data: any) => {
-          setResponse((prev) => prev + data.token);
+          setMessages(prev => 
+            prev.map(msg => 
+              msg.id === assistantMessageId 
+                ? { ...msg, content: msg.content + data.token }
+                : msg
+            )
+          );
         }
       );
     } catch (e) {
       console.error(e);
     } finally {
-      setInput('');
       setLoading(false);
     }
+  };
+
+  const renderMessage = ({ item }: { item: Message }) => {
+    const isUser = item.role === 'user';
+    return (
+      <View style={[
+        styles.messageBubble, 
+        isUser ? styles.userBubble : styles.assistantBubble,
+        isUser && { backgroundColor: colors.tint } // Use theme tint for user bubble
+      ]}>
+        <Text style={[
+          styles.messageText, 
+          { color: isUser ? '#fff' : colors.text }
+        ]}>
+          {item.content}
+        </Text>
+      </View>
+    );
   };
 
   return (
     <KeyboardAvoidingView 
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       style={[styles.container, { backgroundColor: colors.background }]}
-      keyboardVerticalOffset={80} // Offset for the tab bar
     >
-      <View style={styles.innerContainer}>
+      <View style={[styles.innerContainer, { paddingBottom: keyboardVisible ? 10 : 100 }]}>
         <Text style={[styles.header, { color: colors.text }]}>{i18n.t('header_title')}</Text>
 
         {!isModelReady ? (
@@ -115,28 +171,50 @@ export default function ChatInterface() {
         ) : (
           <>
             <View style={styles.chatContainer}>
-              <Text style={styles.success}>{i18n.t('model_ready')}</Text>
-              <ScrollView 
-                style={[styles.responseBox, { backgroundColor: colors.card }]}
-                contentContainerStyle={styles.responseContent}
-              >
-                <Text style={[styles.responseText, { color: colors.text }]}>{response || i18n.t('ai_response_placeholder')}</Text>
-              </ScrollView>
+              {messages.length === 0 && (
+                <Text style={styles.success}>{i18n.t('model_ready')}</Text>
+              )}
+              <FlatList
+                ref={flatListRef}
+                data={messages}
+                renderItem={renderMessage}
+                keyExtractor={item => item.id}
+                contentContainerStyle={styles.listContent}
+                keyboardDismissMode="on-drag"
+                onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
+                onLayout={() => flatListRef.current?.scrollToEnd({ animated: true })}
+              />
             </View>
             
             <View style={styles.inputContainer}>
               <TextInput
-                style={[styles.input, { backgroundColor: colors.inputBackground, color: colors.text }]}
+                style={[
+                  styles.input, 
+                  { 
+                    backgroundColor: colors.inputBackground, 
+                    color: colors.text,
+                    borderColor: colors.separator,
+                    borderWidth: StyleSheet.hairlineWidth,
+                  }
+                ]}
                 placeholder={i18n.t('input_placeholder')}
                 placeholderTextColor={colors.secondaryText}
                 value={input}
                 onChangeText={setInput}
+                multiline
+                maxLength={1000}
               />
-              <Button 
-                title={loading ? i18n.t('button_thinking') : i18n.t('button_send')} 
-                onPress={generateText} 
-                disabled={loading || !context || !input.trim()} 
-              />
+              <TouchableOpacity 
+                onPress={generateText}
+                disabled={loading || !context || !input.trim()}
+                style={[styles.sendButton, { opacity: (loading || !context || !input.trim()) ? 0.5 : 1 }]}
+              >
+                <SymbolView 
+                  name="arrow.up.circle.fill" 
+                  size={32} 
+                  tintColor={colors.tint} 
+                />
+              </TouchableOpacity>
             </View>
           </>
         )}
@@ -153,12 +231,12 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingTop: 60,
     paddingHorizontal: 20,
-    paddingBottom: 100, // Space for tab bar
+    // paddingBottom is handled dynamically
   },
   header: { 
     fontSize: 24, 
     fontWeight: 'bold', 
-    marginBottom: 20, 
+    marginBottom: 10, 
     textAlign: 'center' 
   },
   centerContent: {
@@ -181,24 +259,44 @@ const styles = StyleSheet.create({
     flex: 1,
     marginBottom: 10,
   },
-  responseBox: { 
-    flex: 1, 
-    borderRadius: 10, 
+  listContent: {
+    paddingBottom: 20,
   },
-  responseContent: {
-    padding: 15,
+  messageBubble: {
+    padding: 12,
+    borderRadius: 16,
+    marginBottom: 12,
   },
-  responseText: { 
-    fontSize: 16, 
-    lineHeight: 24 
+  userBubble: {
+    alignSelf: 'flex-end',
+    maxWidth: '85%',
+    borderBottomRightRadius: 4,
+  },
+  assistantBubble: {
+    alignSelf: 'flex-start',
+    width: '100%',
+    backgroundColor: 'transparent',
+    paddingHorizontal: 0,
+  },
+  messageText: {
+    fontSize: 16,
+    lineHeight: 24,
   },
   inputContainer: {
-    marginTop: 10,
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 10,
+    // marginTop removed to equalize gaps
   },
   input: { 
-    padding: 15, 
-    borderRadius: 10, 
-    marginBottom: 10, 
-    fontSize: 16 
+    flex: 1,
+    padding: 12, 
+    paddingTop: 12, // Ensure text starts at top for multiline
+    borderRadius: 20, 
+    fontSize: 16,
+    maxHeight: 100, // Limit to approx 3-4 lines
+  },
+  sendButton: {
+    marginBottom: 4, // Align with input text baseline
   },
 });
