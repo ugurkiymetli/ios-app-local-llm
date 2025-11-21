@@ -76,7 +76,7 @@ export const useLlama = () => {
       await context.completion(
         {
           prompt: llamaPrompt,
-          n_predict: 200,
+          n_predict: 1000,
           stop: ["<|eot_id|>", "<|end_of_text|>"],
         },
         (data: any) => {

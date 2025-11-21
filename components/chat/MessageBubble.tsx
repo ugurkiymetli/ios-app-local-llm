@@ -1,5 +1,6 @@
 import { useThemeColor } from '@/constants/Colors';
 import { StyleSheet, Text, View } from 'react-native';
+import Markdown from 'react-native-markdown-display';
 
 interface MessageBubbleProps {
   role: 'user' | 'assistant';
@@ -16,12 +17,41 @@ export const MessageBubble = ({ role, content }: MessageBubbleProps) => {
       isUser ? styles.userBubble : styles.assistantBubble,
       isUser && { backgroundColor: colors.tint }
     ]}>
-      <Text style={[
-        styles.messageText, 
-        { color: isUser ? '#fff' : colors.text }
-      ]}>
-        {content}
-      </Text>
+      {isUser ? (
+        <Text 
+          style={[
+            styles.messageText, 
+            { color: '#fff' }
+          ]}
+        >
+          {content}
+        </Text>
+      ) : (
+        <Markdown
+          style={{
+            body: { color: colors.text, fontSize: 16, lineHeight: 24 },
+            strong: { fontWeight: 'bold' },
+            em: { fontStyle: 'italic' },
+            bullet_list: { marginVertical: 8 },
+            ordered_list: { marginVertical: 8 },
+            list_item: { marginVertical: 4 },
+            code_inline: { 
+              backgroundColor: colors.card, 
+              paddingHorizontal: 4, 
+              borderRadius: 4,
+              fontFamily: 'monospace',
+            },
+            fence: { 
+              backgroundColor: colors.card, 
+              padding: 10, 
+              borderRadius: 8,
+              fontFamily: 'monospace',
+            },
+          }}
+        >
+          {content}
+        </Markdown>
+      )}
     </View>
   );
 };
