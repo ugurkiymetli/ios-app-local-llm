@@ -1,13 +1,17 @@
 
 import { useThemeColor } from '@/constants/Colors';
+import { database } from '@/database';
+import Chat from '@/database/models/Chat';
+import Message from '@/database/models/Message';
 import i18n from '@/i18n';
+import { Q } from '@nozbe/watermelondb';
 import * as FileSystem from 'expo-file-system/legacy';
 import { SymbolView } from 'expo-symbols';
 import { initLlama, LlamaContext } from 'llama.rn';
 import { useEffect, useRef, useState } from 'react';
 import { Button, FlatList, Keyboard, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
-interface Message {
+interface MessageData {
   id: string;
   role: 'user' | 'assistant';
   content: string;
@@ -20,9 +24,10 @@ export default function ChatInterface() {
   const [context, setContext] = useState<LlamaContext | null>(null);
   
   const [input, setInput] = useState('');
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<MessageData[]>([]);
   const [loading, setLoading] = useState(false);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const flatListRef = useRef<FlatList>(null);
 
   const modelDir = `${FileSystem.documentDirectory}models/`;
@@ -31,6 +36,7 @@ export default function ChatInterface() {
 
   useEffect(() => {
     checkModelExists();
+    initializeChat();
     
     const keyboardWillShow = Keyboard.addListener(
       Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
@@ -50,6 +56,82 @@ export default function ChatInterface() {
       keyboardWillHide.remove();
     };
   }, []);
+
+  const initializeChat = async () => {
+    try {
+      const chatsCollection = database.get<Chat>('chats');
+      const existingChats = await chatsCollection.query().fetch();
+      
+      let chat: Chat;
+      if (existingChats.length === 0) {
+        // Create default chat
+        chat = await database.write(async () => {
+          return await chatsCollection.create((newChat) => {
+            newChat.name = 'Default Chat';
+          });
+        });
+      } else {
+        chat = existingChats[0];
+      }
+      
+      setCurrentChatId(chat.id);
+      await loadMessages(chat.id);
+    } catch (error) {
+      console.error('Failed to initialize chat:', error);
+    }
+  };
+
+  const loadMessages = async (chatId: string) => {
+    try {
+      const messagesCollection = database.get<Message>('messages');
+      const dbMessages = await messagesCollection
+        .query(Q.where('chat_id', chatId), Q.sortBy('created_at', Q.asc))
+        .fetch();
+      
+      const formattedMessages: MessageData[] = dbMessages.map((msg) => ({
+        id: msg.id,
+        role: msg.role,
+        content: msg.content,
+      }));
+      
+      setMessages(formattedMessages);
+    } catch (error) {
+      console.error('Failed to load messages:', error);
+    }
+  };
+
+  const saveMessage = async (role: 'user' | 'assistant', content: string) => {
+    if (!currentChatId) return null;
+    
+    try {
+      const messagesCollection = database.get<Message>('messages');
+      const newMessage = await database.write(async () => {
+        return await messagesCollection.create((message) => {
+          message.chatId = currentChatId;
+          message.role = role;
+          message.content = content;
+        });
+      });
+      return newMessage.id;
+    } catch (error) {
+      console.error('Failed to save message:', error);
+      return null;
+    }
+  };
+
+  const updateMessage = async (messageId: string, content: string) => {
+    try {
+      const messagesCollection = database.get<Message>('messages');
+      const message = await messagesCollection.find(messageId);
+      await database.write(async () => {
+        await message.update((msg) => {
+          msg.content = content;
+        });
+      });
+    } catch (error) {
+      console.error('Failed to update message:', error);
+    }
+  };
 
   const checkModelExists = async () => {
     const fileInfo = await FileSystem.getInfoAsync(modelUri);
@@ -100,16 +182,29 @@ export default function ChatInterface() {
   const generateText = async () => {
     if (!context || !input.trim()) return;
     
-    const userMessage: Message = { id: Date.now().toString(), role: 'user', content: input };
-    const assistantMessageId = (Date.now() + 1).toString();
-    
-    setMessages(prev => [...prev, userMessage, { id: assistantMessageId, role: 'assistant', content: '' }]);
+    const userContent = input;
     setInput('');
     setLoading(true);
 
-    // Llama 3 Instruct Format
-    const prompt = `<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n${userMessage.content}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n`;
+    // Save user message to DB
+    const userMessageId = await saveMessage('user', userContent);
+    if (!userMessageId) return;
 
+    // Add user message to UI
+    const userMessage: MessageData = { id: userMessageId, role: 'user', content: userContent };
+    setMessages(prev => [...prev, userMessage]);
+
+    // Create empty assistant message in DB
+    const assistantMessageId = await saveMessage('assistant', '');
+    if (!assistantMessageId) return;
+
+    // Add empty assistant message to UI
+    setMessages(prev => [...prev, { id: assistantMessageId, role: 'assistant', content: '' }]);
+
+    // Llama 3 Instruct Format
+    const prompt = `<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n${userContent}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n`;
+
+    let fullResponse = '';
     try {
       await context.completion(
         {
@@ -118,15 +213,19 @@ export default function ChatInterface() {
           stop: ["<|eot_id|>", "<|end_of_text|>"],
         },
         (data: any) => {
+          fullResponse += data.token;
+          // Update UI
           setMessages(prev => 
             prev.map(msg => 
               msg.id === assistantMessageId 
-                ? { ...msg, content: msg.content + data.token }
+                ? { ...msg, content: fullResponse }
                 : msg
             )
           );
         }
       );
+      // Update DB with final response
+      await updateMessage(assistantMessageId, fullResponse);
     } catch (e) {
       console.error(e);
     } finally {
@@ -134,7 +233,7 @@ export default function ChatInterface() {
     }
   };
 
-  const renderMessage = ({ item }: { item: Message }) => {
+  const renderMessage = ({ item }: { item: MessageData }) => {
     const isUser = item.role === 'user';
     return (
       <View style={[
