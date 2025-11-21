@@ -2,8 +2,9 @@ import { useThemeColor } from '@/constants/Colors';
 import { MessageData, useChat } from '@/hooks/useChat';
 import { useLlama } from '@/hooks/useLlama';
 import i18n from '@/i18n';
-import { useEffect, useRef, useState } from 'react';
-import { FlatList, Keyboard, KeyboardAvoidingView, Platform, StyleSheet, Text, View } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Animated, FlatList, Keyboard, KeyboardAvoidingView, Platform, StyleSheet, Text, View } from 'react-native';
 import { ChatInput } from './chat/ChatInput';
 import { MessageBubble } from './chat/MessageBubble';
 import { ModelDownload } from './chat/ModelDownload';
@@ -13,6 +14,7 @@ export default function ChatInterface() {
   const [input, setInput] = useState('');
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const flatListRef = useRef<FlatList>(null);
+  const fadeAnim = useRef(new Animated.Value(1)).current;
 
   const { 
     messages, 
@@ -24,12 +26,49 @@ export default function ChatInterface() {
 
   const { 
     isModelReady, 
-    downloadProgress, 
+    downloadProgress,
+    downloadedBytes,
+    totalBytes,
+    estimatedTimeRemaining,
     context, 
     loading, 
     downloadModel, 
-    generateText 
+    generateText,
+    recheckModel
   } = useLlama();
+
+  const [showDownload, setShowDownload] = useState(!isModelReady);
+
+  useFocusEffect(
+    useCallback(() => {
+      recheckModel();
+    }, [recheckModel])
+  );
+
+  useEffect(() => {
+    setShowDownload(!isModelReady);
+  }, [isModelReady]);
+
+  useEffect(() => {
+    if (isModelReady && showDownload) {
+      Animated.timing(fadeAnim, {
+        toValue: 0,
+        duration: 500,
+        useNativeDriver: true,
+      }).start(() => {
+        setShowDownload(false);
+        fadeAnim.setValue(1);
+      });
+    } else if (!isModelReady && !showDownload) {
+      fadeAnim.setValue(0);
+      setShowDownload(true);
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 300,
+        useNativeDriver: true,
+      }).start();
+    }
+  }, [isModelReady]);
 
   useEffect(() => {
     const keyboardWillShow = Keyboard.addListener(
@@ -90,13 +129,18 @@ export default function ChatInterface() {
           {i18n.t('header_title')}
         </Text>
 
-        {!isModelReady ? (
-          <ModelDownload 
-            downloadProgress={downloadProgress} 
-            onDownload={downloadModel} 
-          />
+        {showDownload ? (
+          <Animated.View style={{ flex: 1, opacity: fadeAnim }}>
+            <ModelDownload 
+              downloadProgress={downloadProgress}
+              downloadedBytes={downloadedBytes}
+              totalBytes={totalBytes}
+              estimatedTimeRemaining={estimatedTimeRemaining}
+              onDownload={downloadModel} 
+            />
+          </Animated.View>
         ) : (
-          <>
+          <Animated.View style={{ flex: 1, opacity: fadeAnim }}>
             <View style={styles.chatContainer}>
               {messages.length === 0 && (
                 <Text style={styles.success}>{i18n.t('model_ready')}</Text>
@@ -119,7 +163,7 @@ export default function ChatInterface() {
               onSend={handleSend}
               disabled={loading || !context || !input.trim()}
             />
-          </>
+          </Animated.View>
         )}
       </View>
     </KeyboardAvoidingView>

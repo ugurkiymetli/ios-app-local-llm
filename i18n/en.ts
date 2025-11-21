@@ -9,12 +9,22 @@ const en = {
   model_missing: 'Model missing.',
   download_model: 'Download Model (800MB)',
   downloading: 'Downloading',
+  downloading_button: 'Downloading...',
   model_ready: 'Model Ready!',
   ai_response_placeholder: 'AI response...',
   input_placeholder: 'Ask something...',
   button_thinking: 'Thinking...',
   button_send: 'Send',
   download_failed: 'Download failed',
+
+  // Model Download
+  model_required_title: 'AI Model Required',
+  model_name: 'Llama 3.2 1B Instruct',
+  model_privacy: '100% Private - Runs on your device',
+  model_fast: 'Fast responses, no internet needed',
+  model_size: 'One-time download (~700 MB)',
+  download_disclaimer: 'Download will begin immediately. Make sure you have a stable connection.',
+  time_remaining: 'remaining',
 
   // Settings (Profile)
   settings_title: 'Settings',

@@ -1,10 +1,14 @@
 import i18n from '@/i18n';
 import * as FileSystem from 'expo-file-system/legacy';
 import { initLlama, LlamaContext } from 'llama.rn';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 export const useLlama = () => {
   const [downloadProgress, setDownloadProgress] = useState(0);
+  const [downloadedBytes, setDownloadedBytes] = useState(0);
+  const [totalBytes, setTotalBytes] = useState(0);
+  const downloadStartTimeRef = useRef<number | null>(null);
+  const [estimatedTimeRemaining, setEstimatedTimeRemaining] = useState<number | null>(null);
   const [isModelReady, setIsModelReady] = useState(false);
   const [context, setContext] = useState<LlamaContext | null>(null);
   const [loading, setLoading] = useState(false);
@@ -22,11 +26,15 @@ export const useLlama = () => {
     if (fileInfo.exists) {
       setIsModelReady(true);
       initializeLlama(modelUri);
+    } else {
+      setIsModelReady(false);
+      setContext(null);
     }
   };
 
   const downloadModel = async () => {
     try {
+      downloadStartTimeRef.current = Date.now();
       await FileSystem.makeDirectoryAsync(modelDir, { intermediates: true });
       const downloadResumable = FileSystem.createDownloadResumable(
         modelUrl,
@@ -35,6 +43,16 @@ export const useLlama = () => {
         (downloadProgress) => {
           const progress = downloadProgress.totalBytesWritten / downloadProgress.totalBytesExpectedToWrite;
           setDownloadProgress(progress);
+          setDownloadedBytes(downloadProgress.totalBytesWritten);
+          setTotalBytes(downloadProgress.totalBytesExpectedToWrite);
+          
+          if (downloadStartTimeRef.current) {
+            const elapsedTime = (Date.now() - downloadStartTimeRef.current) / 1000;
+            const downloadSpeed = downloadProgress.totalBytesWritten / elapsedTime;
+            const remainingBytes = downloadProgress.totalBytesExpectedToWrite - downloadProgress.totalBytesWritten;
+            const timeRemaining = remainingBytes / downloadSpeed;
+            setEstimatedTimeRemaining(timeRemaining);
+          }
         }
       );
       const result = await downloadResumable.downloadAsync();
@@ -93,9 +111,13 @@ export const useLlama = () => {
   return {
     isModelReady,
     downloadProgress,
+    downloadedBytes,
+    totalBytes,
+    estimatedTimeRemaining,
     context,
     loading,
     downloadModel,
     generateText,
+    recheckModel: checkModelExists,
   };
 };
