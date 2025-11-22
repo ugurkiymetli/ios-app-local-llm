@@ -4,6 +4,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import * as FileSystem from 'expo-file-system/legacy';
 import { useCallback, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import Markdown from 'react-native-markdown-display';
 
 export default function AppInfoScreen() {
   const colors = useThemeColor();
@@ -16,6 +17,7 @@ export default function AppInfoScreen() {
     chats: number;
     messages: number;
   }>({ chats: 0, messages: 0 });
+  const [messages, setMessages] = useState<any[]>([]);
 
   const modelUri = `${FileSystem.documentDirectory}models/Llama-3.2-1B-Instruct-Q4_K_M.gguf`;
 
@@ -23,6 +25,7 @@ export default function AppInfoScreen() {
     useCallback(() => {
       loadModelInfo();
       loadDbStats();
+      loadMessages();
     }, [])
   );
 
@@ -52,6 +55,39 @@ export default function AppInfoScreen() {
       setDbStats({ chats: chatsCount, messages: messagesCount });
     } catch (error) {
       console.error('Failed to load DB stats:', error);
+    }
+  };
+
+  const loadMessages = async () => {
+    try {
+      const allMessages = await database.get('messages').query().fetch();
+      const messagesData = await Promise.all(
+        allMessages.map(async (msg: any) => {
+          try {
+            const chat = await msg.chat.fetch();
+            return {
+              id: msg.id,
+              chatId: chat.id,
+              chatTitle: chat.title,
+              role: msg.role,
+              content: msg.content,
+              createdAt: new Date(msg.createdAt).toLocaleString(),
+            };
+          } catch (error) {
+            return {
+              id: msg.id,
+              chatId: 'orphaned',
+              chatTitle: 'Deleted Chat',
+              role: msg.role,
+              content: msg.content,
+              createdAt: new Date(msg.createdAt).toLocaleString(),
+            };
+          }
+        })
+      );
+      setMessages(messagesData);
+    } catch (error) {
+      console.error('Failed to load messages:', error);
     }
   };
 
@@ -151,6 +187,40 @@ export default function AppInfoScreen() {
           <Text style={styles.dangerButtonText}>Wipe Database</Text>
         </TouchableOpacity>
       </View>
+
+      <View style={[styles.section, { backgroundColor: colors.card }]}>
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>Messages Data</Text>
+        {messages.length > 0 ? (
+          <ScrollView style={styles.jsonContainer} nestedScrollEnabled>
+            <Markdown
+              style={{
+                body: { color: colors.text },
+                code_inline: { 
+                  backgroundColor: colors.background,
+                  color: colors.tint,
+                  fontSize: 12,
+                },
+                fence: {
+                  backgroundColor: colors.background,
+                  borderRadius: 8,
+                  padding: 12,
+                },
+                code_block: {
+                  color: colors.text,
+                  fontSize: 11,
+                  fontFamily: 'Courier',
+                },
+              }}
+            >
+              {`\`\`\`json\n${JSON.stringify(messages, null, 2)}\n\`\`\``}
+            </Markdown>
+          </ScrollView>
+        ) : (
+          <Text style={[styles.infoText, { color: colors.secondaryText }]}>
+            No messages in database
+          </Text>
+        )}
+      </View>
     </ScrollView>
   );
 }
@@ -169,6 +239,7 @@ const styles = StyleSheet.create({
   content: {
     padding: 20,
     paddingTop: 60,
+    paddingBottom: 120,
   },
   header: {
     fontSize: 28,
@@ -214,5 +285,8 @@ const styles = StyleSheet.create({
     color: '#FF3B30',
     fontSize: 16,
     fontWeight: '600',
+  },
+  jsonContainer: {
+    maxHeight: 500,
   },
 });

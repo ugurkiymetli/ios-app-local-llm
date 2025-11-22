@@ -1,7 +1,7 @@
 const en = {
   // Tabs
   tab_chat: 'Chat',
-  tab_temp: 'Temp',
+  tab_temp: 'Debug',
   tab_profile: 'Profile',
 
   // Chat Interface

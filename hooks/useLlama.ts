@@ -25,7 +25,9 @@ export const useLlama = () => {
     const fileInfo = await FileSystem.getInfoAsync(modelUri);
     if (fileInfo.exists) {
       setIsModelReady(true);
-      initializeLlama(modelUri);
+      if (!context) {
+        initializeLlama(modelUri);
+      }
     } else {
       setIsModelReady(false);
       setContext(null);
@@ -58,7 +60,9 @@ export const useLlama = () => {
       const result = await downloadResumable.downloadAsync();
       if (result?.uri) {
         setIsModelReady(true);
-        initializeLlama(result.uri);
+        if (!context) {
+          initializeLlama(result.uri);
+        }
       }
     } catch (e: any) {
       console.error(e);

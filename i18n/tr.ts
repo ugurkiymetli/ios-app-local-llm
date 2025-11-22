@@ -1,7 +1,7 @@
 const tr = {
   // Tabs
   tab_chat: 'Sohbet',
-  tab_temp: 'Geçici',
+  tab_temp: 'Debug',
   tab_profile: 'Profil',
 
   // Chat Interface
